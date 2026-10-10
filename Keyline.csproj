@@ -5,9 +5,9 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <ApplicationIcon>Assets\keyline.ico</ApplicationIcon>
-    <Version>1.0.0</Version>
-    <Description>Keyline — минималистичный тренажёр слепой печати</Description>
+    <ApplicationIcon>Assets\keyline-white-large.ico</ApplicationIcon>
+    <Version>1.0.7</Version>
+    <Description>KeyLine — минималистичный тренажёр слепой печати</Description>
   </PropertyGroup>
   <ItemGroup>
     <Content Include="Assets\**\*" CopyToOutputDirectory="PreserveNewest" />

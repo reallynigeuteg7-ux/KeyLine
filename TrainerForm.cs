@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 using System.Runtime.InteropServices;
 
 namespace Keyline;
@@ -7,13 +8,13 @@ public sealed class TrainerForm : Form
 {
     public TrainerForm()
     {
-        Text = "Keyline — тренажёр печати";
+        Text = "KeyLine — тренажёр печати";
         ClientSize = new Size(1160, 790);
         MinimumSize = new Size(1000, 790);
         StartPosition = FormStartPosition.CenterScreen;
-        BackColor = Color.FromArgb(14, 15, 17);
+        BackColor = Color.FromArgb(14, 14, 14);
         AutoScaleMode = AutoScaleMode.Dpi;
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "keyline.ico");
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "keyline-window.ico");
         if (File.Exists(iconPath)) Icon = new Icon(iconPath);
         Controls.Add(new TrainerSurface { Dock = DockStyle.Fill });
     }
@@ -29,18 +30,21 @@ public sealed class TrainerForm : Form
 
 public sealed class TrainerSurface : Control
 {
-    private static readonly Color Bg = Color.FromArgb(14, 15, 17);
-    private static readonly Color Card = Color.FromArgb(23, 25, 28);
-    private static readonly Color Line = Color.FromArgb(43, 46, 50);
-    private static readonly Color Ink = Color.FromArgb(233, 236, 239);
-    private static readonly Color Dim = Color.FromArgb(139, 146, 153);
-    private static readonly Color Accent = Color.FromArgb(190, 231, 122);
-    private static readonly Color Wrong = Color.FromArgb(244, 121, 126);
+    private static readonly Color Bg = Color.FromArgb(14, 14, 14);
+    private static readonly Color Card = Color.FromArgb(24, 24, 24);
+    private static readonly Color Line = Color.FromArgb(46, 46, 46);
+    private static readonly Color Ink = Color.FromArgb(235, 235, 235);
+    private static readonly Color Dim = Color.FromArgb(145, 145, 145);
+    private static readonly Color Accent = Color.White;
+    private static readonly Color Wrong = Color.White;
     private readonly Session session = new();
     private readonly HistoryStore history = new();
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 100 };
     private readonly List<(RectangleF Rect, Action Action)> actions = [];
     private readonly Dictionary<(float, bool, bool), Font> fonts = [];
+    private readonly PrivateFontCollection typography = LoadTypography();
+    private readonly Dictionary<char, float> characterWidths = [];
+    private readonly Image brandLogo = Image.FromFile(Path.Combine(AppContext.BaseDirectory, "Assets", "logo-white.png"));
     private string language = "RU";
     private int duration = 60;
     private bool statistics;
@@ -56,7 +60,7 @@ public sealed class TrainerSurface : Control
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.Selectable | ControlStyles.ResizeRedraw, true);
         BackColor = Bg;
         TabStop = true;
-        AccessibleName = "Keyline. Поле тренировки. Печатайте показанный текст. Escape — новая сессия.";
+        AccessibleName = "KeyLine. Поле тренировки. Печатайте показанный текст. Escape — новая сессия.";
         Reset();
         timer.Tick += (_, _) =>
         {
@@ -113,18 +117,16 @@ public sealed class TrainerSurface : Control
         Header(g);
         if (statistics) Statistics(g); else Practice(g);
         DrawLine(g, 36, height - 44, width - 36, height - 44);
-        Write(g, "KEYLINE  /  ПРАКТИКА КАЖДЫЙ ДЕНЬ", 36, height - 29, 8, Dim, true);
-        Write(g, "ESC  заново     •     BACKSPACE  исправить", width - 338, height - 29, 9, Dim);
+        Write(g, "KeyLine  /  ПРАКТИКА КАЖДЫЙ ДЕНЬ", 36, height - 29, 8, Dim, true);
+        Write(g, "ESC  заново     •     BACKSPACE  исправить", width - 360, height - 29, 8.5f, Dim);
     }
     private void Header(Graphics g)
     {
-        Fill(g, new RectangleF(36, 29, 38, 38), Accent, 7);
-        using var pen = new Pen(Bg, 3) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-        g.DrawLine(pen, 48, 39, 48, 56);
-        g.DrawLine(pen, 59, 39, 49, 49);
-        g.DrawLine(pen, 51, 47, 61, 57);
-        Write(g, "keyline", 87, 28, 22, Ink, true);
-        Write(g, "ТРЕНАЖЁР ПЕЧАТИ", 89, 59, 7.5f, Dim, true);
+        var interpolation = g.InterpolationMode;
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        g.DrawImage(brandLogo, new RectangleF(36, 23, 42, 40), new RectangleF(121, 156, 1011, 958), GraphicsUnit.Pixel);
+        g.InterpolationMode = interpolation;
+        Write(g, "KeyLine", 88, 24, 22, Color.White, true);
         Button(g, new(width - 309, 33, 126, 34), "Тренировка", !statistics, () => { statistics = false; Focus(); });
         Button(g, new(width - 172, 33, 136, 34), "Статистика", statistics, () => { if (!session.Started || session.Finished) statistics = true; }, !session.Started || session.Finished);
         DrawLine(g, 36, 91, width - 36, 91);
@@ -172,34 +174,59 @@ public sealed class TrainerSurface : Control
     }
     private void RenderPassage(Graphics g)
     {
-        float charWidth = 13.25f;
-        int columns = Math.Max(25, (int)((width - 124) / charWidth));
+        float availableWidth = width - 124;
         int cursor = session.Typed.Length;
-        if (cursor < pageStart) pageStart = Math.Max(0, pageStart - columns * 3);
-        var lines = Wrap(pageStart, columns);
+        if (cursor < pageStart) pageStart = Math.Max(0, pageStart - 150);
+        var lines = Wrap(g, pageStart, availableWidth);
         while (cursor >= lines[^1].End && lines[^1].End < session.Passage.Length)
-        { pageStart = lines[^1].End; lines = Wrap(pageStart, columns); }
+        { pageStart = lines[^1].End; lines = Wrap(g, pageStart, availableWidth); }
         nextKey = session.Passage[Math.Min(cursor, session.Passage.Length - 1)];
         for (int row = 0; row < lines.Count; row++)
         {
             var (start, end) = lines[row];
+            float x = 60;
             for (int i = start; i < end; i++)
             {
-                float x = 60 + (i - start) * charWidth, y = 420 + row * 42;
+                float charWidth = CharacterWidth(g, session.Passage[i]);
+                float y = 420 + row * 42;
                 bool typed = i < cursor;
                 bool error = typed && session.Typed[i] != session.Passage[i];
-                if (error) Fill(g, new RectangleF(x, y, charWidth, 28), Color.FromArgb(66, 34, 38), 2);
+                if (error)
+                {
+                    Fill(g, new RectangleF(x, y, charWidth, 28), Color.FromArgb(62, 62, 62), 2);
+                    Fill(g, new RectangleF(x, y + 27, charWidth - 1, 1), Color.White);
+                }
                 Write(g, session.Passage[i].ToString(), x, y, 16, error ? Wrong : typed ? Ink : Dim, mono: true);
                 if (i == cursor && blink && Focused) Fill(g, new RectangleF(x, y + 28, charWidth - 1, 2), Accent);
+                x += charWidth;
             }
         }
     }
-    private List<(int Start, int End)> Wrap(int start, int columns)
+    private float CharacterWidth(Graphics g, char character)
+    {
+        if (!characterWidths.TryGetValue(character, out float measured))
+        {
+            using var format = (StringFormat)StringFormat.GenericTypographic.Clone();
+            format.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+            measured = Math.Max(3, g.MeasureString(character.ToString(), FontFor(16, false, true), int.MaxValue, format).Width);
+            characterWidths[character] = measured;
+        }
+        return measured;
+    }
+    private List<(int Start, int End)> Wrap(Graphics g, int start, float availableWidth)
     {
         var list = new List<(int, int)>();
         for (int row = 0; row < 3 && start < session.Passage.Length; row++)
         {
-            int end = Math.Min(start + columns, session.Passage.Length);
+            int end = start;
+            float usedWidth = 0;
+            while (end < session.Passage.Length)
+            {
+                float nextWidth = CharacterWidth(g, session.Passage[end]);
+                if (end > start && usedWidth + nextWidth > availableWidth) break;
+                usedWidth += nextWidth;
+                end++;
+            }
             if (end < session.Passage.Length)
             {
                 int space = session.Passage.LastIndexOf(' ', end - 1, end - start);
@@ -246,7 +273,7 @@ public sealed class TrainerSurface : Control
             for (int i = 0; i < chart.Length; i++)
             {
                 float h = Math.Max(2, (float)(chart[i].Wpm / max * 76));
-                Fill(g, new(62 + i * barW, 476 - h, barW - 18, h), i == chart.Length - 1 ? Accent : Color.FromArgb(77, 93, 62), 3);
+                Fill(g, new(62 + i * barW, 476 - h, barW - 18, h), i == chart.Length - 1 ? Accent : Color.FromArgb(94, 94, 94), 3);
                 Write(g, chart[i].Wpm.ToString("0"), 62 + i * barW, 454 - h, 10, Dim);
             }
         }
@@ -288,8 +315,16 @@ public sealed class TrainerSurface : Control
     private Font FontFor(float size, bool bold, bool mono)
     {
         var key = (size, bold, mono);
-        if (!fonts.TryGetValue(key, out var font)) fonts[key] = font = new Font(mono ? "Consolas" : "Segoe UI", size * 96f / 72f, bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+        if (!fonts.TryGetValue(key, out var font)) fonts[key] = font = new Font(typography.Families[0], size * 96f / 72f, bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
         return font;
+    }
+    private static PrivateFontCollection LoadTypography()
+    {
+        var collection = new PrivateFontCollection();
+        var directory = Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts");
+        collection.AddFontFile(Path.Combine(directory, "Montserrat-Regular.ttf"));
+        collection.AddFontFile(Path.Combine(directory, "Montserrat-Bold.ttf"));
+        return collection;
     }
     private void Write(Graphics g, string text, float x, float y, float size, Color color, bool bold = false, bool mono = false)
     {
@@ -309,7 +344,7 @@ public sealed class TrainerSurface : Control
     }
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { timer.Dispose(); foreach (var font in fonts.Values) font.Dispose(); }
+        if (disposing) { timer.Dispose(); brandLogo.Dispose(); foreach (var font in fonts.Values) font.Dispose(); typography.Dispose(); }
         base.Dispose(disposing);
     }
 }
